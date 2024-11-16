@@ -1,5 +1,17 @@
 # shadowsocks
+```shell
+run --package shadowsocks-rust --bin ssserver -- 
+--server-addr=0.0.0.0:9999 
+--encrypt-method=chacha20-ietf-poly1305 
+--password=123123 
+--id=test 
+-e 1889505080 
+--useUpSum 0 
+--useDownSum 0 
+--maxDown 1073741824000
+--dir D:\project\fzh\shadowsocks-rust\tmp
 
+```
 [![License](https://img.shields.io/github/license/zonyitoo/shadowsocks-rust.svg)](https://github.com/zonyitoo/shadowsocks-rust)
 [![Build & Test](https://github.com/shadowsocks/shadowsocks-rust/actions/workflows/build-and-test.yml/badge.svg)](https://github.com/shadowsocks/shadowsocks-rust/actions/workflows/build-and-test.yml)
 [![Build MSRV](https://github.com/shadowsocks/shadowsocks-rust/actions/workflows/build-msrv.yml/badge.svg)](https://github.com/shadowsocks/shadowsocks-rust/actions/workflows/build-msrv.yml)
