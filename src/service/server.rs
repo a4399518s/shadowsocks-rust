@@ -1,7 +1,7 @@
 //! Server launchers
 
 use std::{future::Future, net::IpAddr, path::PathBuf, process::ExitCode, time::Duration};
-
+use std::time::{SystemTime, UNIX_EPOCH};
 use clap::{builder::PossibleValuesParser, Arg, ArgAction, ArgGroup, ArgMatches, Command, ValueHint};
 use futures::future::{self, Either};
 use log::{info, trace};
@@ -27,6 +27,7 @@ use crate::{
     config::{Config as ServiceConfig, RuntimeMode},
     monitor, vparser,
 };
+use crate::util::time::{date_time_format, second_to_date};
 
 /// Defines command line options
 pub fn define_command_line_options(mut app: Command) -> Command {
@@ -137,6 +138,50 @@ pub fn define_command_line_options(mut app: Command) -> Command {
                 .action(ArgAction::Set)
                 .requires("PLUGIN")
                 .help("Set SIP003 plugin options"),
+        )
+        .arg(
+            Arg::new("ID")
+                .long("id")
+                .num_args(1)
+                .action(ArgAction::Set)
+                .help("服务器id"),
+        )
+        .arg(
+            Arg::new("EXPIRE")
+                .short('e')
+                .long("expire")
+                .num_args(1)
+                .action(ArgAction::Set)
+                .help("过期时间（秒）"),
+        )
+        .arg(
+            Arg::new("USE_UP_SUM")
+                .long("useUpSum")
+                .num_args(1)
+                .action(ArgAction::Set)
+                .help("已上传数据量"),
+        )
+        .arg(
+            Arg::new("USE_DOWN_SUM")
+                .long("useDownSum")
+                .num_args(1)
+                .action(ArgAction::Set)
+                .help("已下载数据量"),
+        )
+        .arg(
+            Arg::new("MAX_DOWN")
+                .long("maxDown")
+                .num_args(1)
+                .action(ArgAction::Set)
+                .help("最大下载量"),
+        )
+        .arg(
+            Arg::new("DIR")
+                .short('d')
+                .long("dir")
+                .num_args(1)
+                .action(ArgAction::Set)
+                .help("实例目录"),
         )
         .arg(Arg::new("MANAGER_ADDR").long("manager-addr").num_args(1).action(ArgAction::Set).value_parser(vparser::parse_manager_addr).alias("manager-address").help("ShadowSocks Manager (ssmgr) address, could be \"IP:Port\", \"Domain:Port\" or \"/path/to/unix.sock\""))
         .arg(Arg::new("ACL").long("acl").num_args(1).action(ArgAction::Set).value_hint(ValueHint::FilePath).help("Path to ACL (Access Control List)"))
@@ -352,6 +397,62 @@ pub fn create(matches: &ArgMatches) -> Result<(Runtime, impl Future<Output = Exi
                 }
             };
 
+            let id = match matches.get_one::<String>("ID") {
+                Some(id) => id.clone(),
+                None => {
+                    panic!("`id` is required")
+                }
+            };
+            info!("id: {id}");
+            let dir = match matches.get_one::<String>("DIR") {
+                Some(dir) => dir.clone(),
+                None => {
+                    panic!("`dir` is required")
+                }
+            };
+            info!("id: {id}; dir: {dir}");
+            let expire = match matches.get_one::<String>("EXPIRE") {
+                Some(expire) => expire.parse::<u64>().unwrap(),
+                None => {
+                    panic!("`expire` is required")
+                }
+            };
+            let current_time = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            if current_time > expire {
+                panic!("current_time > expire {current_time} > {expire} {} > {}"
+                       ,date_time_format(&second_to_date(current_time))
+                       ,date_time_format(&second_to_date(expire))
+                )
+            }
+
+            info!("id: {id}; expire: {expire}");
+            let useUpSum = match matches.get_one::<String>("USE_UP_SUM") {
+                Some(useUpSum) => useUpSum.parse::<u64>().unwrap(),
+                None => {
+                    panic!("`useUpSum` is required")
+                }
+            };
+
+
+            info!("id: {id}; useUpSum: {useUpSum}");
+            let useDownSum = match matches.get_one::<String>("USE_DOWN_SUM") {
+                Some(useUpSum) => useUpSum.parse::<u64>().unwrap(),
+                None => {
+                    panic!("`useDownSum` is required")
+                }
+            };
+            info!("id: {id}; useDownSum: {useDownSum}");
+            let maxDown = match matches.get_one::<String>("MAX_DOWN") {
+                Some(useUpSum) => useUpSum.parse::<u64>().unwrap(),
+                None => {
+                    panic!("`maxDown` is required")
+                }
+            };
+            info!("id: {id}; maxDown: {maxDown}");
+
             let svr_addr = svr_addr.parse::<ServerAddr>().expect("server-addr");
             let timeout = matches.get_one::<u64>("TIMEOUT").map(|x| Duration::from_secs(*x));
 
@@ -359,7 +460,12 @@ pub fn create(matches: &ArgMatches) -> Result<(Runtime, impl Future<Output = Exi
             if let Some(timeout) = timeout {
                 sc.set_timeout(timeout);
             }
-
+            sc.set_id(id);
+            sc.dir = Some(dir);
+            sc.expire = Some(expire);
+            sc.useUpSum = Some(useUpSum);
+            sc.useDownSum = Some(useDownSum);
+            sc.maxDown = Some(maxDown);
             if let Some(p) = matches.get_one::<String>("PLUGIN").cloned() {
                 let plugin = PluginConfig {
                     plugin: p,

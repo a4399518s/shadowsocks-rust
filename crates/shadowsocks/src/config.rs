@@ -412,8 +412,20 @@ pub struct ServerConfig {
 
     /// Remark (Profile Name), normally used as an identifier of this erver
     remarks: Option<String>,
+
     /// ID (SIP008) is a random generated UUID
-    id: Option<String>,
+    pub id: Option<String>,
+    pub pid: u32,
+    // 过期时间
+    pub expire: Option<u64>,
+    // 已使用上传数据量
+    pub useUpSum: Option<u64>,
+    // 已使用下载数据量
+    pub useDownSum: Option<u64>,
+    // 最大下载数据量
+    pub maxDown: Option<u64>,
+    // 数据文件夹
+    pub dir: Option<String>,
 
     /// Mode
     mode: Mode,
@@ -562,7 +574,13 @@ impl ServerConfig {
             plugin: None,
             plugin_addr: None,
             remarks: None,
+            pid: std::process::id(),
             id: None,
+            expire: None,
+            useUpSum: None,
+            useDownSum: None,
+            maxDown: None,
+            dir: None,
             mode: Mode::TcpAndUdp, // Server serves TCP & UDP by default
             weight: ServerWeight::new(),
             source: ServerSource::Default,

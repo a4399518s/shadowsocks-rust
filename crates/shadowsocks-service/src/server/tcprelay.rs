@@ -7,7 +7,8 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 use log::{debug, error, info, trace, warn};
 use shadowsocks::{
     crypto::CipherKind,
@@ -22,14 +23,18 @@ use tokio::{
 };
 
 use crate::net::{utils::ignore_until_end, MonProxyStream};
-
+use crate::server::util::{dump_info, dump_pid};
 use super::context::ServiceContext;
 
 /// TCP server instance
 pub struct TcpServer {
     context: Arc<ServiceContext>,
-    svr_cfg: ServerConfig,
+    pub svr_cfg: ServerConfig,
     listener: ProxyListener,
+    pub useUpSum: Arc<AtomicU64>,
+    pub useDownSum: Arc<AtomicU64>,
+    expire: u64,
+    maxDown: u64,
 }
 
 impl TcpServer {
@@ -41,8 +46,12 @@ impl TcpServer {
         let listener = ProxyListener::bind_with_opts(context.context(), &svr_cfg, accept_opts).await?;
         Ok(TcpServer {
             context,
-            svr_cfg,
             listener,
+            useUpSum: Arc::from(AtomicU64::new(svr_cfg.useUpSum.clone().unwrap())),
+            useDownSum: Arc::from(AtomicU64::new(svr_cfg.useDownSum.clone().unwrap())),
+            expire: svr_cfg.expire.clone().unwrap(),
+            maxDown: svr_cfg.maxDown.clone().unwrap(),
+            svr_cfg,
         })
     }
 
@@ -63,8 +72,37 @@ impl TcpServer {
             self.listener.local_addr().expect("listener.local_addr"),
             self.svr_cfg.addr()
         );
+        dump_pid(self.svr_cfg.dir.clone().unwrap(),self.svr_cfg.id.clone().unwrap(),self.svr_cfg.pid);
 
+        let dir = self.svr_cfg.dir.clone().unwrap();
+        let id = self.svr_cfg.id.clone().unwrap();
+        let pid = self.svr_cfg.pid;
+        let useUpSum = self.useUpSum.clone();
+        let useDownSum = self.useDownSum.clone();
+        tokio::spawn(async move {
+            loop {
+                time::sleep(time::Duration::from_secs(1)).await;
+                dump_info(&dir,&id,pid,&useUpSum,&useDownSum);
+            }
+        });
         loop {
+            let current_time = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            if current_time > self.expire {
+                panic!("current_time > expire {current_time} > {}",self.expire)
+            }
+            if self.useDownSum.load(Ordering::Relaxed) > self.maxDown {
+                let dir = self.svr_cfg.dir.clone().unwrap();
+                let id = self.svr_cfg.id.clone().unwrap();
+                let pid = self.svr_cfg.pid;
+                let useUpSum = self.useUpSum.clone();
+                let useDownSum = self.useDownSum.clone();
+                dump_info(&dir,&id,pid,&useUpSum,&useDownSum);
+                panic!("self.useDownSum > self.maxDown {} > {}",self.useDownSum.load(Ordering::Relaxed),self.maxDown)
+            }
+
             let flow_stat = self.context.flow_stat();
 
             let (local_stream, peer_addr) = match self
@@ -91,6 +129,9 @@ impl TcpServer {
                 peer_addr,
                 stream: local_stream,
                 timeout: self.svr_cfg.timeout(),
+                useUpSum: self.useUpSum.clone(),
+                useDownSum: self.useDownSum.clone(),
+                maxDown: self.maxDown,
             };
 
             tokio::spawn(async move {
@@ -122,6 +163,9 @@ struct TcpServerClient {
     peer_addr: SocketAddr,
     stream: ProxyServerStream<MonProxyStream<TokioTcpStream>>,
     timeout: Option<Duration>,
+    pub useUpSum: Arc<AtomicU64>,
+    pub useDownSum: Arc<AtomicU64>,
+    maxDown: u64,
 }
 
 impl TcpServerClient {
@@ -260,6 +304,8 @@ impl TcpServerClient {
 
         match copy_encrypted_bidirectional(self.method, &mut self.stream, &mut remote_stream).await {
             Ok((rn, wn)) => {
+                self.useUpSum.fetch_add(rn,Ordering::Relaxed);
+                self.useDownSum.fetch_add(wn,Ordering::Relaxed);
                 trace!(
                     "tcp tunnel {} <-> {} closed, L2R {} bytes, R2L {} bytes",
                     self.peer_addr,

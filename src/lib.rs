@@ -11,6 +11,7 @@ pub mod password;
 pub mod service;
 pub mod sys;
 pub mod vparser;
+pub mod util;
 
 /// Exit code when server exits unexpectedly
 pub const EXIT_CODE_SERVER_EXIT_UNEXPECTEDLY: sysexits::ExitCode = sysexits::ExitCode::Software;
