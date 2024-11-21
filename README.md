@@ -8,7 +8,7 @@ run --package shadowsocks-rust --bin ssserver --
 -e 1889505080 
 --useUpSum 0 
 --useDownSum 0 
---maxDown 1073741824000
+--max_down 1073741824000
 --dir D:\project\fzh\shadowsocks-rust\tmp
 
 ```

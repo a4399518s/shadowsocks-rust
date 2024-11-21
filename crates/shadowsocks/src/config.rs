@@ -11,7 +11,7 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-
+use std::sync::atomic::AtomicU64;
 use base64::Engine as _;
 use byte_string::ByteStr;
 use bytes::Bytes;
@@ -380,7 +380,11 @@ pub enum ServerSource {
     CommandLine,   //< Created from command line
     OnlineConfig,  //< Created from online configuration (SIP008)
 }
-
+#[derive(Debug)]
+pub struct RunInfo{
+    pub use_up_sum: AtomicU64,
+    pub use_down_sum: AtomicU64,
+}
 /// Configuration for a server
 #[derive(Clone, Debug)]
 pub struct ServerConfig {
@@ -417,15 +421,12 @@ pub struct ServerConfig {
     pub id: Option<String>,
     pub pid: u32,
     // 过期时间
-    pub expire: Option<u64>,
-    // 已使用上传数据量
-    pub useUpSum: Option<u64>,
-    // 已使用下载数据量
-    pub useDownSum: Option<u64>,
+    pub expire: u64,
     // 最大下载数据量
-    pub maxDown: Option<u64>,
+    pub max_down: u64,
     // 数据文件夹
     pub dir: Option<String>,
+    pub run_info: Arc<RunInfo>,
 
     /// Mode
     mode: Mode,
@@ -436,6 +437,7 @@ pub struct ServerConfig {
     /// Source
     source: ServerSource,
 }
+
 
 #[inline]
 fn make_derived_key(method: CipherKind, password: &str, enc_key: &mut [u8]) {
@@ -576,11 +578,13 @@ impl ServerConfig {
             remarks: None,
             pid: std::process::id(),
             id: None,
-            expire: None,
-            useUpSum: None,
-            useDownSum: None,
-            maxDown: None,
+            expire: u64::MAX,
+            max_down: u64::MAX,
             dir: None,
+            run_info: Arc::new(RunInfo{
+                use_up_sum: Default::default(),
+                use_down_sum: Default::default(),
+            }),
             mode: Mode::TcpAndUdp, // Server serves TCP & UDP by default
             weight: ServerWeight::new(),
             source: ServerSource::Default,

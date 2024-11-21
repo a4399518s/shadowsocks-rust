@@ -1,10 +1,12 @@
 //! Server launchers
 
 use std::{future::Future, net::IpAddr, path::PathBuf, process::ExitCode, time::Duration};
+use std::sync::atomic::Ordering;
 use std::time::{SystemTime, UNIX_EPOCH};
 use clap::{builder::PossibleValuesParser, Arg, ArgAction, ArgGroup, ArgMatches, Command, ValueHint};
 use futures::future::{self, Either};
 use log::{info, trace};
+use serde::de::Unexpected::Option;
 use tokio::{
     self,
     runtime::{Builder, Runtime},
@@ -20,7 +22,7 @@ use shadowsocks_service::{
         plugin::PluginConfig,
     },
 };
-
+use shadowsocks_service::shadowsocks::util::dump_info;
 #[cfg(feature = "logging")]
 use crate::logging;
 use crate::{
@@ -170,7 +172,7 @@ pub fn define_command_line_options(mut app: Command) -> Command {
         )
         .arg(
             Arg::new("MAX_DOWN")
-                .long("maxDown")
+                .long("max_down")
                 .num_args(1)
                 .action(ArgAction::Set)
                 .help("最大下载量"),
@@ -325,6 +327,7 @@ pub fn define_command_line_options(mut app: Command) -> Command {
 
 /// Create `Runtime` and `main` entry
 pub fn create(matches: &ArgMatches) -> Result<(Runtime, impl Future<Output = ExitCode>), ExitCode> {
+    let mut one_sc = None;
     let (config, runtime) = {
         let config_path_opt = matches.get_one::<PathBuf>("CONFIG").cloned().or_else(|| {
             if !matches.contains_id("SERVER_CONFIG") {
@@ -427,31 +430,31 @@ pub fn create(matches: &ArgMatches) -> Result<(Runtime, impl Future<Output = Exi
                        ,date_time_format(&second_to_date(expire))
                 )
             }
-
             info!("id: {id}; expire: {expire}");
-            let useUpSum = match matches.get_one::<String>("USE_UP_SUM") {
-                Some(useUpSum) => useUpSum.parse::<u64>().unwrap(),
-                None => {
-                    panic!("`useUpSum` is required")
-                }
-            };
 
+            let use_up_sum = match matches.get_one::<String>("USE_UP_SUM") {
+                Some(use_up_sum) => use_up_sum.parse::<u64>().unwrap(),
+                None => {
+                    panic!("`use_up_sum` is required")
+                }
+            };
+            info!("id: {id}; use_up_sum: {use_up_sum}");
 
-            info!("id: {id}; useUpSum: {useUpSum}");
-            let useDownSum = match matches.get_one::<String>("USE_DOWN_SUM") {
-                Some(useUpSum) => useUpSum.parse::<u64>().unwrap(),
+            let use_down_sum = match matches.get_one::<String>("USE_DOWN_SUM") {
+                Some(use_down_sum) => use_down_sum.parse::<u64>().unwrap(),
                 None => {
-                    panic!("`useDownSum` is required")
+                    panic!("`use_down_sum` is required")
                 }
             };
-            info!("id: {id}; useDownSum: {useDownSum}");
-            let maxDown = match matches.get_one::<String>("MAX_DOWN") {
+            info!("id: {id}; use_down_sum: {use_down_sum}");
+
+            let max_down = match matches.get_one::<String>("MAX_DOWN") {
                 Some(useUpSum) => useUpSum.parse::<u64>().unwrap(),
                 None => {
-                    panic!("`maxDown` is required")
+                    panic!("`max_down` is required")
                 }
             };
-            info!("id: {id}; maxDown: {maxDown}");
+            info!("id: {id}; max_down: {max_down}");
 
             let svr_addr = svr_addr.parse::<ServerAddr>().expect("server-addr");
             let timeout = matches.get_one::<u64>("TIMEOUT").map(|x| Duration::from_secs(*x));
@@ -462,10 +465,10 @@ pub fn create(matches: &ArgMatches) -> Result<(Runtime, impl Future<Output = Exi
             }
             sc.set_id(id);
             sc.dir = Some(dir);
-            sc.expire = Some(expire);
-            sc.useUpSum = Some(useUpSum);
-            sc.useDownSum = Some(useDownSum);
-            sc.maxDown = Some(maxDown);
+            sc.expire = expire;
+            sc.run_info.use_up_sum.store(use_up_sum,Ordering::Relaxed);
+            sc.run_info.use_down_sum.store(use_down_sum,Ordering::Relaxed);
+            sc.max_down = max_down;
             if let Some(p) = matches.get_one::<String>("PLUGIN").cloned() {
                 let plugin = PluginConfig {
                     plugin: p,
@@ -493,7 +496,7 @@ pub fn create(matches: &ArgMatches) -> Result<(Runtime, impl Future<Output = Exi
             if matches.get_flag("TCP_AND_UDP") {
                 sc.set_mode(Mode::TcpAndUdp);
             }
-
+            one_sc = Some(sc.clone());
             config.server.push(ServerInstanceConfig::with_server_config(sc));
         }
 
@@ -642,27 +645,34 @@ pub fn create(matches: &ArgMatches) -> Result<(Runtime, impl Future<Output = Exi
 
         (config, runtime)
     };
-
     let main_fut = async move {
+        // 创建一个用于监控终止信号的异步任务
         let abort_signal = monitor::create_signal_monitor();
+        // 初始化并运行服务器的异步任务
         let server = run_server(config);
 
+        // 使用 `tokio::pin!` 将 `abort_signal` 和 `server` 的 futures 固定到堆上
         tokio::pin!(abort_signal);
         tokio::pin!(server);
-
+        let sc = one_sc.unwrap();
+        let dir = sc.dir.unwrap();
+        // 使用 `future::select` 同时等待两个异步任务中的一个完成
         match future::select(server, abort_signal).await {
-            // Server future resolved without an error. This should never happen.
+            // 如果 `server` 任务优先完成且没有返回错误，理论上不应该发生
             Either::Left((Ok(..), ..)) => {
-                eprintln!("server exited unexpectedly");
-                crate::EXIT_CODE_SERVER_EXIT_UNEXPECTEDLY.into()
+                eprintln!("server exited unexpectedly"); // 打印错误信息
+                crate::EXIT_CODE_SERVER_EXIT_UNEXPECTEDLY.into() // 返回对应的退出码
             }
-            // Server future resolved with error, which are listener errors in most cases
+            // 如果 `server` 任务优先完成且返回错误，通常是监听器（listener）错误
             Either::Left((Err(err), ..)) => {
-                eprintln!("server aborted with {err}");
-                crate::EXIT_CODE_SERVER_ABORTED.into()
+                eprintln!("server aborted with {err}"); // 打印错误信息并包含错误详情
+                crate::EXIT_CODE_SERVER_ABORTED.into() // 返回对应的退出码
             }
-            // The abort signal future resolved. Means we should just exit.
-            Either::Right(_) => ExitCode::SUCCESS,
+            // 如果 `abort_signal` 任务优先完成，说明收到终止信号，可以安全退出
+            Either::Right(_) => {
+                dump_info(&dir,&sc.id.unwrap(),sc.pid,sc.run_info.use_up_sum.load(Ordering::Relaxed),sc.run_info.use_down_sum.load(Ordering::Relaxed));
+                ExitCode::SUCCESS // 返回成功退出码
+            },
         }
     };
 

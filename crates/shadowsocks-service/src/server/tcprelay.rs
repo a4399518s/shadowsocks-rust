@@ -21,9 +21,9 @@ use tokio::{
     net::TcpStream as TokioTcpStream,
     time,
 };
-
+use shadowsocks::config::RunInfo;
+use shadowsocks::util::{dump_info, dump_pid};
 use crate::net::{utils::ignore_until_end, MonProxyStream};
-use crate::server::util::{dump_info, dump_pid};
 use super::context::ServiceContext;
 
 /// TCP server instance
@@ -31,10 +31,7 @@ pub struct TcpServer {
     context: Arc<ServiceContext>,
     pub svr_cfg: ServerConfig,
     listener: ProxyListener,
-    pub useUpSum: Arc<AtomicU64>,
-    pub useDownSum: Arc<AtomicU64>,
-    expire: u64,
-    maxDown: u64,
+    pub run_info: Arc<RunInfo>,
 }
 
 impl TcpServer {
@@ -47,11 +44,9 @@ impl TcpServer {
         Ok(TcpServer {
             context,
             listener,
-            useUpSum: Arc::from(AtomicU64::new(svr_cfg.useUpSum.clone().unwrap())),
-            useDownSum: Arc::from(AtomicU64::new(svr_cfg.useDownSum.clone().unwrap())),
-            expire: svr_cfg.expire.clone().unwrap(),
-            maxDown: svr_cfg.maxDown.clone().unwrap(),
+            run_info:svr_cfg.run_info.clone(),
             svr_cfg,
+
         })
     }
 
@@ -77,12 +72,11 @@ impl TcpServer {
         let dir = self.svr_cfg.dir.clone().unwrap();
         let id = self.svr_cfg.id.clone().unwrap();
         let pid = self.svr_cfg.pid;
-        let useUpSum = self.useUpSum.clone();
-        let useDownSum = self.useDownSum.clone();
+        let run_info = self.run_info.clone();
         tokio::spawn(async move {
             loop {
                 time::sleep(time::Duration::from_secs(1)).await;
-                dump_info(&dir,&id,pid,&useUpSum,&useDownSum);
+                dump_info(&dir,&id,pid,run_info.use_up_sum.load(Ordering::Relaxed),run_info.use_down_sum.load(Ordering::Relaxed));
             }
         });
         loop {
@@ -90,17 +84,15 @@ impl TcpServer {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
-            if current_time > self.expire {
-                panic!("current_time > expire {current_time} > {}",self.expire)
+            if current_time > self.svr_cfg.expire {
+                panic!("current_time > expire {current_time} > {}",self.svr_cfg.expire)
             }
-            if self.useDownSum.load(Ordering::Relaxed) > self.maxDown {
+            if self.run_info.use_down_sum.load(Ordering::Relaxed) > self.svr_cfg.max_down {
                 let dir = self.svr_cfg.dir.clone().unwrap();
                 let id = self.svr_cfg.id.clone().unwrap();
                 let pid = self.svr_cfg.pid;
-                let useUpSum = self.useUpSum.clone();
-                let useDownSum = self.useDownSum.clone();
-                dump_info(&dir,&id,pid,&useUpSum,&useDownSum);
-                panic!("self.useDownSum > self.maxDown {} > {}",self.useDownSum.load(Ordering::Relaxed),self.maxDown)
+                dump_info(&dir,&id,pid,self.run_info.use_up_sum.load(Ordering::Relaxed),self.run_info.use_down_sum.load(Ordering::Relaxed));
+                panic!("self.use_down_sum > self.max_down {} > {}",self.run_info.use_down_sum.load(Ordering::Relaxed),self.svr_cfg.max_down)
             }
 
             let flow_stat = self.context.flow_stat();
@@ -129,9 +121,7 @@ impl TcpServer {
                 peer_addr,
                 stream: local_stream,
                 timeout: self.svr_cfg.timeout(),
-                useUpSum: self.useUpSum.clone(),
-                useDownSum: self.useDownSum.clone(),
-                maxDown: self.maxDown,
+                run_info: self.run_info.clone(),
             };
 
             tokio::spawn(async move {
@@ -163,9 +153,7 @@ struct TcpServerClient {
     peer_addr: SocketAddr,
     stream: ProxyServerStream<MonProxyStream<TokioTcpStream>>,
     timeout: Option<Duration>,
-    pub useUpSum: Arc<AtomicU64>,
-    pub useDownSum: Arc<AtomicU64>,
-    maxDown: u64,
+    pub run_info: Arc<RunInfo>,
 }
 
 impl TcpServerClient {
@@ -304,8 +292,8 @@ impl TcpServerClient {
 
         match copy_encrypted_bidirectional(self.method, &mut self.stream, &mut remote_stream).await {
             Ok((rn, wn)) => {
-                self.useUpSum.fetch_add(rn,Ordering::Relaxed);
-                self.useDownSum.fetch_add(wn,Ordering::Relaxed);
+                self.run_info.use_up_sum.fetch_add(rn,Ordering::Relaxed);
+                self.run_info.use_down_sum.fetch_add(wn,Ordering::Relaxed);
                 trace!(
                     "tcp tunnel {} <-> {} closed, L2R {} bytes, R2L {} bytes",
                     self.peer_addr,

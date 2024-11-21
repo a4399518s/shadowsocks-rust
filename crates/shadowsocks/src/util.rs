@@ -1,11 +1,5 @@
 use std::fs;
-use std::fs::File;
 use std::io::Write;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use byteorder::WriteBytesExt;
-use shadowsocks::ServerConfig;
-use crate::server::TcpServer;
 
 pub fn dump_pid(dir: String,id: String,pid:u32){
     let dir = format!("{}/{}",dir,id);
@@ -19,7 +13,7 @@ pub fn dump_pid(dir: String,id: String,pid:u32){
     writeln!(pidFile, "{}", pid).expect("TODO: panic message");
 }
 
-pub fn dump_info(dir: &String,id: &String,pid:u32,useUpSum:&Arc<AtomicU64>,useDownSum:&Arc<AtomicU64>){
+pub fn dump_info(dir: &String,id: &String,pid:u32,useUpSum:u64,useDownSum:u64){
     let pidDir = format!("{dir}/{id}/{pid}");
     // 判断文件夹是否存在
     if fs::metadata(&pidDir).is_err() {
@@ -27,8 +21,8 @@ pub fn dump_info(dir: &String,id: &String,pid:u32,useUpSum:&Arc<AtomicU64>,useDo
         fs::create_dir_all(&pidDir).expect("TODO: panic message");
     }
     let mut useDownSumFile = fs::File::create(format!("{pidDir}/useDownSum")).unwrap();
-    writeln!(useDownSumFile, "{}", useDownSum.load(Ordering::Relaxed)).expect("TODO: panic message");
+    writeln!(useDownSumFile, "{}", useDownSum).expect("TODO: panic message");
     let mut useUpSumFile = fs::File::create(format!("{pidDir}/useUpSum")).unwrap();
-    writeln!(useUpSumFile, "{}", useUpSum.load(Ordering::Relaxed)).expect("TODO: panic message");
+    writeln!(useUpSumFile, "{}", useUpSum).expect("TODO: panic message");
 
 }
