@@ -13,16 +13,16 @@ pub fn dump_pid(dir: String,id: String,pid:u32){
     writeln!(pidFile, "{}", pid).expect("TODO: panic message");
 }
 
-pub fn dump_info(dir: &String,id: &String,pid:u32,useUpSum:u64,useDownSum:u64){
+pub fn dump_info(dir: &String,id: &String,pid:u32,use_up_sum:u64,use_down_sum:u64){
     let pidDir = format!("{dir}/{id}/{pid}");
     // 判断文件夹是否存在
     if fs::metadata(&pidDir).is_err() {
         // 如果文件夹不存在，则创建
         fs::create_dir_all(&pidDir).expect("TODO: panic message");
     }
-    let mut useDownSumFile = fs::File::create(format!("{pidDir}/useDownSum")).unwrap();
-    writeln!(useDownSumFile, "{}", useDownSum).expect("TODO: panic message");
-    let mut useUpSumFile = fs::File::create(format!("{pidDir}/useUpSum")).unwrap();
-    writeln!(useUpSumFile, "{}", useUpSum).expect("TODO: panic message");
+    let mut use_down_sum_file = fs::File::create(format!("{pidDir}/use_down_sum")).unwrap();
+    writeln!(use_down_sum_file, "{}", use_down_sum).expect("TODO: panic message");
+    let mut use_up_sum_file = fs::File::create(format!("{pidDir}/use_up_sum")).unwrap();
+    writeln!(use_up_sum_file, "{}", use_up_sum).expect("TODO: panic message");
 
 }
