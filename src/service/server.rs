@@ -670,6 +670,7 @@ pub fn create(matches: &ArgMatches) -> Result<(Runtime, impl Future<Output = Exi
             }
             // 如果 `abort_signal` 任务优先完成，说明收到终止信号，可以安全退出
             Either::Right(_) => {
+                info!("退出前dump流量信息.");
                 dump_info(&dir,&sc.id.unwrap(),sc.pid,sc.run_info.use_up_sum.load(Ordering::Relaxed),sc.run_info.use_down_sum.load(Ordering::Relaxed));
                 ExitCode::SUCCESS // 返回成功退出码
             },
