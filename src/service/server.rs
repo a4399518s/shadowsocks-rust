@@ -158,14 +158,14 @@ pub fn define_command_line_options(mut app: Command) -> Command {
         )
         .arg(
             Arg::new("USE_UP_SUM")
-                .long("useUpSum")
+                .long("use_up_sum")
                 .num_args(1)
                 .action(ArgAction::Set)
                 .help("已上传数据量"),
         )
         .arg(
             Arg::new("USE_DOWN_SUM")
-                .long("useDownSum")
+                .long("use_down_sum")
                 .num_args(1)
                 .action(ArgAction::Set)
                 .help("已下载数据量"),

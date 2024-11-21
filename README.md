@@ -19,8 +19,8 @@ run --package shadowsocks-rust --bin ssserver --
  --password 123123  \
  --id test  \
  -e 1889505080 \
- --useUpSum 0  \
- --useDownSum 0  \
+ --use_up_sum 0  \
+ --use_down_sum 0  \
  --max_down 1073741824000 \
  --dir /tmp/test
 
